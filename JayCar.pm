@@ -2,7 +2,7 @@ package Device::ParallelPort::JayCar;
 use strict;
 use Carp;
 use Device::ParallelPort;
-our $VERSION = "0.01";
+our $VERSION = "0.02";
 
 =head1 NAME
 
@@ -40,6 +40,14 @@ Should examples such
 =head1 QUESTIONS
 
 How to handle errors, when writting to the port?
+
+=head1 AUTHOR
+
+Scott Penrose L<scottp@dd.com.au>, L<http://linux.dd.com.au/>
+
+=head1 SEE ALSO
+
+L<Device::ParallelPort>
 
 =cut
 
