@@ -2,7 +2,39 @@ package Device::ParallelPort::JayCar;
 use strict;
 use Carp;
 use Device::ParallelPort;
-our $VERSION = "0.02";
+our $VERSION = "0.04";
+
+
+# XXX NOTE - Temporary version with DUMB mappings...
+#
+# 
+# Card =
+#       8 - $card
+
+# C3    C2      C1      C0      Card ID         Number
+#
+# 1     0       1               1               10
+# 1     0       0               2               8
+# 1     1       1               3               14
+# 1     1       0               4               12
+# 0     0       1               5               2
+# 0     0       0               6               0
+# 0     1       1               7               6
+# 0     1       0               8               4
+#
+# Logic =
+#       Card shift left
+
+my %cardmap = (
+	0 => 10,
+	1 => 8,
+	2 => 14,
+	3 => 12,
+	4 => 2,
+	5 => 0,
+	6 => 6,
+	7 => 4,
+);
 
 =head1 NAME
 
@@ -41,6 +73,12 @@ Should examples such
 
 How to handle errors, when writting to the port?
 
+=head1 COPYRIGHT
+
+Copyright (c) 2002,2004 Scott Penrose. All rights reserved.
+This program is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
 =head1 AUTHOR
 
 Scott Penrose L<scottp@dd.com.au>, L<http://linux.dd.com.au/>
@@ -52,19 +90,21 @@ L<Device::ParallelPort>
 =cut
 
 # How many relays (allows you to sub class and add more)
-sub RELAYS { 8 };
+# (max Jaycar ID = 8, max relays = 8)
+sub RELAYS { 8 * 8 };
 
 # Need: Parallel Port and Board ID
 # Return: Object
 sub new {
-	my ($class, $parport, $boardid) = @_;
+	my ($class, $parport, $boards) = @_;
 	my $this = bless {}, ref($class) || $class;
-	$this->init($parport, $boardid);
+	$boards = [1, 2];
+	$this->init($parport, $boards);
 	return $this;
 }
 
 sub init {
-	my ($this, $parport, $boardid) = @_;
+	my ($this, $parport, $boards) = @_;
 	if (ref($parport)) {
 		$this->{PARPORT} = $parport;
 	} elsif (defined($parport)) {
@@ -73,7 +113,9 @@ sub init {
 	} else {
 		croak "Invalid parport provided";
 	}
-	$this->{BOARDID} = $boardid || "0";
+
+	# Store array of boards activated (ie: only update those boards)
+	$this->{BOARDS} = ref($boards) eq "ARRAY" ? $boards : [$boards];
 
 	$this->{RELAYS} = [];
 	for (my $i = 0; $i < $this->RELAYS(); $i++) {
@@ -97,7 +139,7 @@ sub get {
 
 sub _checkid {
 	my ($this, $id) = @_;
-	if ($id < 0 || $id > $this->RELAYS) {
+	if ($id < 0 || $id >= $this->RELAYS) {
 		croak "Invalid relay id specified - $id";
 	}
 }
@@ -109,7 +151,7 @@ sub on {
 	my ($this, $id, $delay) = @_;
 	$this->_checkid($id);
 	$this->{RELAY}[$id] = 1;
-	$this->update if (!defined($delay) || !$delay);
+	$this->update unless ($delay);
 }
 
 # See relay_on
@@ -117,7 +159,7 @@ sub off {
 	my ($this, $id, $delay) = @_;
 	$this->_checkid($id);
 	$this->{RELAY}[$id] = 0;
-	$this->update if (!defined($delay) || !$delay);
+	$this->update unless ($delay);
 }
 
 # Update the device.
@@ -126,9 +168,13 @@ sub off {
 # How: Use parport to update byte and then flash it.
 sub update {
 	my ($this) = @_;
-	$this->_parport->set_byte(0, $this->_byte_calc);# Set the bit for this light
-	$this->_parport->set_byte(2, 11);           	# Flash the address on then off
-	$this->_parport->set_byte(2, 10);		# XXX This should be using real address
+
+	foreach my $board (@{$this->{BOARDS}}) {
+		$this->_parport->set_byte(2, chr($cardmap{$board}));		# Prepare
+		$this->_parport->set_byte(0, chr($this->_byte_calc($board)));	# Set data
+		$this->_parport->set_byte(2, chr($cardmap{$board} + 1));	# Flash bit 1 (strobe)
+		$this->_parport->set_byte(2, chr($cardmap{$board}));		# Undo flash/strobe
+	}
 }
 
 # Add bits together and return as integer.
@@ -136,10 +182,10 @@ sub update {
 # Return: Integer representing byte
 # How: Add bits together as a byte (only those turned on)
 sub _byte_calc {
-        my ($this) = @_;
+        my ($this, $board) = @_;
         my $ret = 0;
-        for (my $i = 0; $i < $this->RELAYS; $i++) {
-		if ($this->{RELAY}[$i]) {
+        for (my $i = 0; $i < 8; $i++) {
+		if ($this->{RELAY}[$i + ($board * 8)]) {
 			$ret = $ret + (1 << $i);
 		}
         }
